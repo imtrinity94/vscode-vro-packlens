@@ -1,0 +1,6 @@
+node_modules/**/test/**
+*.vsix
+samples/**
+.github/**
+media/screenshot.png
+.gitignore

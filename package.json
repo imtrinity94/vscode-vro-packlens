@@ -1,0 +1,73 @@
+{
+  "name": "vro-packlens",
+  "displayName": "vRO PackLens",
+  "description": "See inside any vRO package - right in VS Code. Click a .package file to browse its workflows, actions, configuration and resource elements in their folder structure.",
+  "version": "2026.1.0",
+  "publisher": "imtrinity94",
+  "author": "Mayank Goyal",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "vRO",
+    "vRealize Orchestrator",
+    "Aria Automation Orchestrator",
+    "VCF Operations Orchestrator",
+    "package"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "vroPackLens.packageViewer",
+        "displayName": "vRO PackLens",
+        "selector": [
+          {
+            "filenamePattern": "*.package"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vroPackLens.open",
+        "title": "Open with vRO PackLens",
+        "category": "vRO PackLens"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "vroPackLens.open",
+          "when": "resourceExtname == .package",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "vroPackLens.open",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imtrinity94/vscode-vro-packlens.git"
+  },
+  "homepage": "https://github.com/imtrinity94/vscode-vro-packlens#readme",
+  "bugs": {
+    "url": "https://github.com/imtrinity94/vscode-vro-packlens/issues"
+  },
+  "icon": "media/icon.png"
+}
