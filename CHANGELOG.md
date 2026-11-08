@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.2.0 – 2026-11-08
+- Workflow schema viewer: each workflow opens on a Schema tab drawn like the Orchestrator client (same layout, icons and arrow colours as vRO Peekage).
+- Click a step to see its type, called action/workflow, next/false/error paths, bindings and script; drag to pan, Ctrl/Cmd + scroll or the toolbar to zoom, Fit / 100%.
+- Save the schema as SVG or PNG.
+- Workflow details split into tabs: Schema, Inputs & variables, Scripts.
+- Fix: tree hierarchy was not indented inside VS Code (the webview security policy blocked inline styles).
+- Fix: no longer tries to parse non-XML resource content as XML.
+
 ## 2026.1.0 – 2026-11-06
 - First release of the VS Code extension (vRO PackLens).
 - Custom read-only editor for `*.package` files.

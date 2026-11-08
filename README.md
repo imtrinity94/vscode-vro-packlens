@@ -6,7 +6,7 @@ See inside any vRO `.package` file - right in VS Code.
 
 Click any `.package` file in the VS Code Explorer and it opens as a browsable tree:
 
-- **Workflows** – in their Orchestrator folder structure; inputs, outputs, variables, schema items and every scriptable task
+- **Workflows** – in their Orchestrator folder structure, with a **schema diagram** drawn like the Orchestrator client (click a step for its bindings and script, zoom, pan, save as SVG/PNG), plus inputs, outputs, variables and every script
 - **Actions** – grouped by module; inputs, return type, script
 - **Configuration Elements** – folders and attributes (SecureStrings are masked)
 - **Resource Elements** – metadata, text preview, *Save as…*
@@ -30,3 +30,6 @@ A sample package for testing is in `samples/`.
 
 ## Related
 [vRO Peekage](https://github.com/imtrinity94/vRO-Peekage) is the separate web app for viewing packages in a browser.
+
+## Credits
+Schema icons from [wdt4vro](https://github.com/imtrinity94/wdt4vro) (MIT); schema layout ported from vRO Peekage.

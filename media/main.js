@@ -45,7 +45,7 @@
   /* ---------- XML helpers ---------- */
   const parser = new DOMParser();
   function parseXml(text) {
-    if (!text) return null;
+    if (!text || text.replace(/^\s+/, '').charAt(0) !== '<') return null;
     const doc = parser.parseFromString(text, 'text/xml');
     if (doc.getElementsByTagName('parsererror').length) return null;
     return doc;
@@ -84,6 +84,8 @@
       return n ? txt(n) : attr(c, 'name');
     }).filter(Boolean);
   }
+
+  function num(v) { return v === '' || v == null ? null : parseFloat(v); }
 
   function decodeScript(node) {
     if (!node) return '';
@@ -138,13 +140,20 @@
         const o = {
           name: attr(w, 'name'), type: attr(w, 'type'), displayName: txt(kid(w, 'display-name')) || attr(w, 'name'),
           description: txt(kid(w, 'description')), script: decodeScript(sc), linked: attr(w, 'linked-workflow-id'),
-          module: attr(w, 'script-module'), next: attr(w, 'out-name'),
+          module: attr(w, 'script-module'), next: attr(w, 'out-name'), altNext: attr(w, 'alt-out-name'), catchName: attr(w, 'catch-name'),
+          endMode: attr(w, 'end-mode'), prototypeId: attr(w, 'prototype-id'), launchedWorkflowId: attr(w, 'launched-workflow-id'),
+          conditionTargets: kids(w, 'condition').map(function (c) { return attr(c, 'label'); }).filter(function (l) { return l && l !== 'null'; }),
+          x: num(attr(kid(w, 'position'), 'x')), y: num(attr(kid(w, 'position'), 'y')),
           inBind: kids(kid(w, 'in-binding'), 'bind').map(function (b) { return { name: attr(b, 'name'), type: attr(b, 'type'), source: attr(b, 'export-name') }; }),
           outBind: kids(kid(w, 'out-binding'), 'bind').map(function (b) { return { name: attr(b, 'name'), type: attr(b, 'type'), target: attr(b, 'export-name') }; })
         };
-        if (o.script && o.script.trim()) it.scripts.push({ label: o.displayName, code: o.script });
+        if (o.script && o.script.trim()) { o.scriptIdx = it.scripts.length; it.scripts.push({ label: o.displayName + ' (' + o.name + ')', code: o.script }); }
         return o;
       });
+      it.rootName = attr(root, 'root-name');
+      const sp = kid(root, 'position');
+      it.start = sp ? { x: num(attr(sp, 'x')) || 0, y: num(attr(sp, 'y')) || 0 } : null;
+      it.errorHandlers = kids(root, 'error-handler').map(function (e) { return attr(e, 'name'); }).filter(Boolean);
       const presentation = kid(root, 'presentation');
       it.presentation = presentation ? presentation.outerHTML : '';
     } else if (type === 'ScriptModule' && root) {
@@ -227,13 +236,13 @@
     const icon = isGroup ? ICONS[node.group.icon] : (node.kind === 'module' ? ICONS.module : ICONS.folder);
     const cls = isGroup ? 'row group ic-' + node.group.icon : 'row folder' + (node.kind === 'module' ? ' ic-module' : '');
     const count = isGroup ? '<span class="count">' + node.count + '</span>' : '';
-    let html = '<div class="' + cls + (isCollapsed ? ' collapsed' : '') + '" data-path="' + esc(node.path) + '" style="--d:' + depth + '" role="treeitem" aria-expanded="' + (!isCollapsed) + '">' +
+    let html = '<div class="' + cls + (isCollapsed ? ' collapsed' : '') + '" data-path="' + esc(node.path) + '" data-d="' + depth + '" role="treeitem" aria-expanded="' + (!isCollapsed) + '">' +
       '<span class="twisty">' + ICONS.chevron + '</span><span class="ico">' + icon + '</span><span class="label">' + esc(node.label) + '</span>' + count + '</div>';
     if (!isCollapsed) {
       html += folderHtml;
       html += leaves.map(function (it) {
         const g = GROUPS.filter(function (x) { return x.key === it.type; })[0] || GROUPS[5];
-        return '<div class="row leaf ic-' + g.icon + (it.id === selectedId ? ' selected' : '') + '" data-id="' + esc(it.id) + '" style="--d:' + (depth + 1) + '" role="treeitem" title="' + esc(it.name) + '">' +
+        return '<div class="row leaf ic-' + g.icon + (it.id === selectedId ? ' selected' : '') + '" data-id="' + esc(it.id) + '" data-d="' + (depth + 1) + '" role="treeitem" title="' + esc(it.name) + '">' +
           '<span class="twisty"></span><span class="ico">' + ICONS[g.icon] + '</span><span class="label">' + esc(it.name) + '</span></div>';
       }).join('');
     }
@@ -272,17 +281,29 @@
     if (it.description) h += '<p class="desc">' + esc(it.description) + '</p>';
 
     if (it.type === 'Workflow') {
-      h += kv([['ID', it.objectId || it.id], ['Version', it.version], ['API version', it.apiVersion]]);
-      h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.inputs), it.inputs.length);
-      h += section('Outputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.outputs), it.outputs.length);
-      h += section('Variables', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Value', 'value', 'mono'], ['Read-only', 'readOnly']], it.attributes), it.attributes.length);
-      const flow = it.wfItems.map(function (w) {
-        return { name: w.name, displayName: w.displayName, type: w.type, calls: w.module || w.linked || '', next: w.next,
-          inputs: w.inBind.map(function (b) { return b.name + (b.source ? ' ← ' + b.source : ''); }).join(', '),
-          outputs: w.outBind.map(function (b) { return b.name + (b.target ? ' → ' + b.target : ''); }).join(', ') };
-      });
-      h += section('Schema items', table([['Item', 'name', 'mono'], ['Name', 'displayName'], ['Type', 'type'], ['Calls', 'calls', 'mono'], ['In', 'inputs', 'mono'], ['Out', 'outputs', 'mono'], ['Next', 'next', 'mono']], flow), flow.length);
-      h += section('Scripts', it.scripts.length ? it.scripts.map(function (s, i) { return codeBlock(s.code, s.label, i); }).join('') : '<p class="muted">No scriptable tasks.</p>', it.scripts.length);
+      const tabs = [['schema', 'Schema', it.wfItems.length], ['details', 'Inputs & variables', it.inputs.length + it.outputs.length + it.attributes.length], ['scripts', 'Scripts', it.scripts.length]];
+      h += '<div class="tabs" role="tablist">' + tabs.map(function (t) { return '<button class="tab' + (wfTab === t[0] ? ' active' : '') + '" role="tab" data-act="wf-tab" data-tab="' + t[0] + '">' + esc(t[1]) + ' <span class="count">' + t[2] + '</span></button>'; }).join('') + '</div>';
+      if (wfTab === 'schema') {
+        h += '<div class="wf-toolbar"><button class="icon-btn" data-act="zoom-out" title="Zoom out">−</button><span id="wfzoom" class="muted small zoomval"></span>' +
+          '<button class="icon-btn" data-act="zoom-in" title="Zoom in">+</button><button data-act="zoom-fit">Fit</button><button data-act="zoom-100">100%</button>' +
+          '<span class="spacer"></span><button data-act="save-svg">Save SVG…</button><button data-act="save-png">Save PNG…</button></div>' +
+          '<div id="wfview" class="wf-view"></div>' +
+          '<div class="legend"><span><i class="lg lg-blue"></i> next</span><span><i class="lg lg-green"></i> from a decision</span><span><i class="lg lg-red"></i> false path / error handling</span>' +
+          '<span class="muted">Click a step for its details. Drag to pan, Ctrl + scroll to zoom.</span></div><div id="wfitem"></div>';
+      } else if (wfTab === 'details') {
+        h += kv([['ID', it.objectId || it.id], ['Version', it.version], ['API version', it.apiVersion]]);
+        h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.inputs), it.inputs.length);
+        h += section('Outputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.outputs), it.outputs.length);
+        h += section('Variables', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Value', 'value', 'mono'], ['Read-only', 'readOnly']], it.attributes), it.attributes.length);
+        const flow = it.wfItems.map(function (w) {
+          return { name: w.name, displayName: w.displayName, type: w.type, calls: w.module || w.linked || '', next: w.next,
+            inputs: w.inBind.map(function (b) { return b.name + (b.source ? ' ← ' + b.source : ''); }).join(', '),
+            outputs: w.outBind.map(function (b) { return b.name + (b.target ? ' → ' + b.target : ''); }).join(', ') };
+        });
+        h += section('Schema items', table([['Item', 'name', 'mono nowrap'], ['Name', 'displayName'], ['Type', 'type'], ['Calls', 'calls', 'mono'], ['In', 'inputs', 'mono'], ['Out', 'outputs', 'mono'], ['Next', 'next', 'mono nowrap']], flow), flow.length);
+      } else {
+        h += section('Scripts', it.scripts.length ? it.scripts.map(function (s, i) { return codeBlock(s.code, s.label, i); }).join('') : '<p class="muted">No scriptable tasks.</p>', it.scripts.length);
+      }
     } else if (it.type === 'ScriptModule') {
       h += kv([['Module', it.module], ['ID', it.id], ['Version', it.version], ['Return type', it.returnType || 'void'], ['Runtime', it.runtime]]);
       h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.inputs), it.inputs.length);
@@ -336,12 +357,86 @@
     const tree = document.getElementById('tree');
     const html = buildTree(items).map(function (g) { return renderNode(g, 0, true); }).join('');
     tree.innerHTML = html || '<p class="muted pad">' + (items.length ? 'No matches.' : 'This package has no elements.') + '</p>';
+    // The webview CSP blocks inline style attributes, so indent through the CSSOM instead
+    Array.prototype.forEach.call(tree.querySelectorAll('.row[data-d]'), function (r) { r.style.paddingLeft = (6 + (+r.dataset.d) * 16) + 'px'; });
   }
   function renderDetailPane() {
     document.getElementById('detail').innerHTML = renderDetail(byId[selectedId]);
+    const it = byId[selectedId];
+    if (it && it.type === 'Workflow' && wfTab === 'schema') mountSchema(it, true);
+  }
+
+  /* ---------- workflow schema ---------- */
+  let wfTab = 'schema';
+  let wfSel = null;
+  let zoom = 1;
+  let layoutCache = null;
+
+  function mountSchema(it, fit) {
+    const view = document.getElementById('wfview');
+    if (!view || !window.PackLensSchema) return;
+    if (!layoutCache || layoutCache.id !== it.id) layoutCache = { id: it.id, layout: window.PackLensSchema.computeLayout(it) };
+    const layout = layoutCache.layout;
+    if (!layout) { view.outerHTML = '<p class="muted">No schema layout information in this workflow.</p>'; return; }
+    view.innerHTML = window.PackLensSchema.renderSvg(it, layout, wfSel, true);
+    if (fit) zoom = Math.min(1, Math.max(0.5, Math.round(((view.clientWidth - 2) / layout.width) * 100) / 100 || 1));
+    applyZoom();
+    renderItemPanel(it);
+  }
+  function applyZoom() {
+    const svg = document.querySelector('#wfview svg');
+    const l = layoutCache && layoutCache.layout;
+    if (!svg || !l) return;
+    svg.setAttribute('width', Math.round(l.width * zoom));
+    svg.setAttribute('height', Math.round(l.height * zoom));
+    const zv = document.getElementById('wfzoom');
+    if (zv) zv.textContent = Math.round(zoom * 100) + '%';
+  }
+  function setZoom(z) { zoom = Math.min(2.5, Math.max(0.25, Math.round(z * 100) / 100)); applyZoom(); }
+
+  function renderItemPanel(it) {
+    const box = document.getElementById('wfitem');
+    if (!box) return;
+    const w = it.wfItems.filter(function (x) { return x.name === wfSel; })[0];
+    if (!w) { box.innerHTML = ''; return; }
+    let h = '<div class="item-panel"><div class="ip-head"><img alt="" width="28" height="28" src="' + window.PackLensSchema.iconUri(window.PackLensSchema.iconFor(w)) + '"><div><div class="d-type">' + esc(w.type) + ' · ' + esc(w.name) + '</div><h3 class="ip-title">' + esc(w.displayName) + '</h3></div></div>';
+    if (w.description) h += '<p class="desc">' + esc(w.description) + '</p>';
+    h += kv([['Calls action', w.module], ['Calls workflow', w.linked || w.launchedWorkflowId], ['Next', w.next], ['False / alt path', w.altNext], ['On error', w.catchName], ['Prototype', w.prototypeId]]);
+    h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Bound to', 'source', 'mono']], w.inBind), w.inBind.length);
+    h += section('Outputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Bound to', 'target', 'mono']], w.outBind), w.outBind.length);
+    if (w.scriptIdx != null) h += section('Script', codeBlock(w.script, w.displayName, w.scriptIdx));
+    box.innerHTML = h + '</div>';
+  }
+
+  function serializeSchema() {
+    const svg = document.querySelector('#wfview svg');
+    const l = layoutCache.layout;
+    const c = svg.cloneNode(true);
+    c.setAttribute('width', Math.round(l.width));
+    c.setAttribute('height', Math.round(l.height));
+    Array.prototype.forEach.call(c.querySelectorAll('[data-ui]'), function (n) { n.remove(); });
+    return new XMLSerializer().serializeToString(c);
+  }
+  function saveSchema(kind, it) {
+    if (!document.querySelector('#wfview svg')) return;
+    const base = safe(it.name).replace(/\s+/g, '_') + '-schema';
+    const text = serializeSchema();
+    if (kind === 'svg') { vscode.postMessage({ type: 'saveFile', name: base + '.svg', text: text }); return; }
+    const l = layoutCache.layout, k = 2;
+    const img = new Image();
+    img.onload = function () {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(l.width * k); canvas.height = Math.round(l.height * k);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(k, k);
+      ctx.drawImage(img, 0, 0, l.width, l.height);
+      vscode.postMessage({ type: 'saveFile', name: base + '.png', base64: canvas.toDataURL('image/png').split(',')[1] });
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
   }
 
   function select(id) {
+    if (id !== selectedId) { wfSel = null; }
     selectedId = id;
     persist();
     Array.prototype.forEach.call(document.querySelectorAll('.row.leaf.selected'), function (r) { r.classList.remove('selected'); });
@@ -395,7 +490,53 @@
       else if (act === 'copy-script') { vscode.postMessage({ type: 'copy', text: it.scripts[+b.dataset.idx].code }); }
       else if (act === 'open-xml') { vscode.postMessage({ type: 'openText', language: it.root ? 'xml' : guessLang(it), content: it.raw.data || '' }); }
       else if (act === 'save-res') { vscode.postMessage({ type: 'saveResource', id: it.id, name: it.name }); }
+      else if (act === 'wf-tab') { wfTab = b.dataset.tab; renderDetailPane(); }
+      else if (act === 'zoom-in') { setZoom(zoom + 0.15); }
+      else if (act === 'zoom-out') { setZoom(zoom - 0.15); }
+      else if (act === 'zoom-100') { setZoom(1); }
+      else if (act === 'zoom-fit') { const v = document.getElementById('wfview'); if (v && layoutCache.layout) setZoom((v.clientWidth - 2) / layoutCache.layout.width); }
+      else if (act === 'save-svg') { saveSchema('svg', it); }
+      else if (act === 'save-png') { saveSchema('png', it); }
     });
+
+    // schema: click a step, drag to pan, ctrl/cmd + wheel to zoom
+    const detail = document.getElementById('detail');
+    let drag = null;
+    function pickNode(node) {
+      const it = byId[selectedId];
+      if (!it) return;
+      wfSel = wfSel === node.dataset.item ? null : node.dataset.item;
+      const view = document.getElementById('wfview');
+      const sl = view.scrollLeft, st = view.scrollTop;
+      view.innerHTML = window.PackLensSchema.renderSvg(it, layoutCache.layout, wfSel, true);
+      applyZoom();
+      view.scrollLeft = sl; view.scrollTop = st;
+      renderItemPanel(it);
+    }
+    detail.addEventListener('pointerdown', function (e) {
+      const view = e.target.closest('#wfview');
+      if (!view || e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, sl: view.scrollLeft, st: view.scrollTop, moved: false, node: e.target.closest('.wf-node'), view: view };
+      view.setPointerCapture(e.pointerId);
+    });
+    detail.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
+      if (drag.moved) { drag.view.scrollLeft = drag.sl - (e.clientX - drag.x); drag.view.scrollTop = drag.st - (e.clientY - drag.y); }
+    });
+    detail.addEventListener('pointerup', function () {
+      if (drag && !drag.moved && drag.node) pickNode(drag.node);
+      drag = null;
+    });
+    detail.addEventListener('keydown', function (e) {
+      const n = e.target.closest && e.target.closest('.wf-node');
+      if (n && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickNode(n); }
+    });
+    detail.addEventListener('wheel', function (e) {
+      if (!(e.ctrlKey || e.metaKey) || !e.target.closest('#wfview')) return;
+      e.preventDefault();
+      setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9));
+    }, { passive: false });
 
     // resizable split
     const side = app.querySelector('.side');

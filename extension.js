@@ -155,6 +155,12 @@ class PackageEditorProvider {
           if (choice === 'Open Folder in New Window') vscode.commands.executeCommand('vscode.openFolder', root, true);
           else if (choice === 'Reveal') vscode.commands.executeCommand('revealFileInOS', root);
         }
+        else if (msg.type === 'saveFile') {
+          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(document.uri, '..', msg.name || 'schema.svg') });
+          if (!target) return;
+          await vscode.workspace.fs.writeFile(target, msg.base64 ? Buffer.from(msg.base64, 'base64') : Buffer.from(msg.text || '', 'utf8'));
+          vscode.window.showInformationMessage('Saved ' + path.basename(target.fsPath));
+        }
         else if (msg.type === 'copy') {
           await vscode.env.clipboard.writeText(msg.text || '');
           vscode.window.setStatusBarMessage('Copied to clipboard', 2000);
@@ -168,6 +174,8 @@ class PackageEditorProvider {
   getHtml(webview, mediaRoot) {
     const nonce = Array.from({ length: 32 }, function () { return 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]; }).join('');
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'main.js'));
+    const iconsUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'vroIcons.js'));
+    const schemaUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'schema.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'main.css'));
     const version = this.context.extension.packageJSON.version;
     return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
@@ -175,6 +183,8 @@ class PackageEditorProvider {
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
       '<link href="' + styleUri + '" rel="stylesheet"><title>vRO PackLens</title></head>' +
       '<body data-version="' + version + '"><div id="app"><div class="loading">Reading package…</div></div>' +
+      '<script nonce="' + nonce + '" src="' + iconsUri + '"></script>' +
+      '<script nonce="' + nonce + '" src="' + schemaUri + '"></script>' +
       '<script nonce="' + nonce + '" src="' + scriptUri + '"></script></body></html>';
   }
 }

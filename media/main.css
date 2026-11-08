@@ -75,7 +75,7 @@ button.link:hover { text-decoration: underline; background: none; }
 
 /* tree */
 .tree { flex: 1; overflow: auto; padding-bottom: 12px; outline: none; }
-.row { display: flex; align-items: center; gap: 4px; height: 22px; padding-left: calc(6px + var(--d) * 14px); padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none; }
+.row { display: flex; align-items: center; gap: 4px; height: 22px; padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none; }
 .row:hover { background: var(--vscode-list-hoverBackground); }
 .row .twisty { display: inline-flex; width: 16px; flex: none; color: var(--vscode-icon-foreground, var(--muted)); transform: rotate(90deg); }
 .row.collapsed .twisty { transform: none; }
@@ -116,3 +116,25 @@ pre.preview { border: 1px solid var(--border); border-radius: 3px; }
 details.meta { margin-top: 24px; }
 details.meta summary { cursor: pointer; color: var(--muted); }
 details.meta table { margin-top: 6px; }
+
+/* workflow tabs + schema */
+.tabs { display: flex; gap: 2px; margin: 16px 0 12px; border-bottom: 1px solid var(--border); }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; color: var(--muted); }
+.tab:hover { background: none; color: var(--vscode-foreground); }
+.tab.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder, #0079ad); }
+.tab .count { font-size: 0.85em; opacity: .8; }
+.wf-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.zoomval { min-width: 42px; text-align: center; }
+.wf-view { overflow: auto; max-height: 64vh; border: 1px solid var(--border); border-radius: 6px; background: #fafcfd; cursor: grab; }
+.wf-view:active { cursor: grabbing; }
+.wf-view svg { display: block; }
+.wf-node { cursor: pointer; outline: none; }
+.wf-node:hover .wf-hit { fill: rgba(0, 124, 187, 0.08); }
+.wf-node:focus-visible .wf-hit { stroke: #0079ad; stroke-width: 2; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.9em; margin-top: 8px; align-items: center; }
+.lg { display: inline-block; width: 22px; vertical-align: middle; border-top: 2px solid; margin-right: 4px; }
+.lg-blue { border-color: #3794ff; } .lg-green { border-color: #2e8540; } .lg-red { border-color: #e05252; border-top-style: dashed; }
+.item-panel { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 6px; }
+.ip-head { display: flex; align-items: center; gap: 10px; }
+.ip-title { font-size: 1.15em; text-transform: none; letter-spacing: 0; margin: 2px 0 0; }
+td.nowrap { white-space: nowrap; word-break: normal; }
