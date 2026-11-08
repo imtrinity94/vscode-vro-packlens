@@ -1,5 +1,8 @@
 # vRO PackLens
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/imtrinity94.vro-packlens?label=VS%20Code%20Marketplace&color=0079ad)](https://marketplace.visualstudio.com/items?itemName=imtrinity94.vro-packlens)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/imtrinity94.vro-packlens?color=0079ad)](https://marketplace.visualstudio.com/items?itemName=imtrinity94.vro-packlens)
+
 See inside any vRO `.package` file - right in VS Code.
 
 ![vRO PackLens](media/screenshot.png)
@@ -19,7 +22,11 @@ Extras: filter by name/module/folder (optionally inside scripts), open any scrip
 Works with packages from vRealize Orchestrator 7.x, Aria Automation Orchestrator 8.x and VCF Operations Orchestrator 9.x. The original package is never modified.
 
 ## Install
-Extensions view → `…` menu → **Install from VSIX…** → pick `vro-packlens-<version>.vsix`.
+Search **vRO PackLens** in the VS Code Extensions view, or install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=imtrinity94.vro-packlens).
+
+From the command line: `code --install-extension imtrinity94.vro-packlens`
+
+Offline: Extensions view → `…` menu → **Install from VSIX…** → pick `vro-packlens-<version>.vsix`.
 
 If another extension already claims `.package`, right-click the file → **Open with vRO PackLens** (or *Open With…* → vRO PackLens → *Configure default*).
 
