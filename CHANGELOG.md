@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.3.0 – 2026-11-08
+- Edit scripts in place: **Edit** on any action or scriptable-task script opens it in a normal VS Code editor tab (.js / .ps1 / .py, so IntelliSense and your themes apply). Saving (Ctrl/Cmd+S) writes the change into `<name>-modified.package` next to the original; the original package is never changed.
+- Edit configuration element values (string, number, boolean) from the Attributes table. SecureStrings stay read-only.
+- Each edited element gets its version bumped once, signatures and certificates are kept, and element files are written back in their original encoding (rules from vRO Peekage's import tests on vRO 9.1).
+- Edited elements are marked **M** in the tree, with an "edited" badge and a banner pointing at the modified copy (**Open copy**).
+- Syntax colours by language: JavaScript (Rhino), PowerShell / PowerCLI, Python and Node.js, worked out from the action's runtime, its action environment, or the script itself. Colours follow light and dark VS Code themes.
+
 ## 2026.2.0 – 2026-11-08
 - Workflow schema viewer: each workflow opens on a Schema tab drawn like the Orchestrator client (same layout, icons and arrow colours as vRO Peekage).
 - Click a step to see its type, called action/workflow, next/false/error paths, bindings and script; drag to pan, Ctrl/Cmd + scroll or the toolbar to zoom, Fit / 100%.

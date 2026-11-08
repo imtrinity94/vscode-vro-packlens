@@ -138,3 +138,35 @@ details.meta table { margin-top: 6px; }
 .ip-head { display: flex; align-items: center; gap: 10px; }
 .ip-title { font-size: 1.15em; text-transform: none; letter-spacing: 0; margin: 2px 0 0; }
 td.nowrap { white-space: nowrap; word-break: normal; }
+
+/* edit state */
+.editbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--border);
+  background: var(--vscode-inputValidation-infoBackground, rgba(55,148,255,.12)); }
+.editbar[hidden] { display: none; }
+.editbar span { flex: 1; }
+.row .mod { margin-left: auto; padding-left: 8px; font-size: 0.85em; font-weight: 600; color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.edited-badge { font-size: 0.8em; padding: 0 6px; border-radius: 8px; color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); border: 1px solid currentColor; }
+.code.edited { border-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.lang-badge { font-size: 0.8em; padding: 0 6px; border-radius: 8px; margin-left: 6px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.lang-powershell { background: #2b5f9e; color: #fff; }
+.lang-python { background: #3a6e3a; color: #fff; }
+
+/* syntax colours: VS Code Dark+ by default, Light+ for light themes */
+.hljs-keyword, .hljs-literal, .hljs-built_in.hljs-keyword, .hljs-meta .hljs-keyword { color: #569cd6; }
+.hljs-built_in, .hljs-type, .hljs-title.class_ { color: #4ec9b0; }
+.hljs-title.function_, .hljs-title { color: #dcdcaa; }
+.hljs-string, .hljs-regexp, .hljs-template-tag { color: #ce9178; }
+.hljs-number { color: #b5cea8; }
+.hljs-comment, .hljs-quote { color: #6a9955; font-style: italic; }
+.hljs-variable, .hljs-params, .hljs-attr, .hljs-property, .hljs-template-variable { color: #9cdcfe; }
+.hljs-meta, .hljs-symbol, .hljs-selector-tag { color: #c586c0; }
+.hljs-operator, .hljs-punctuation { color: inherit; }
+body.vscode-light .hljs-keyword, body.vscode-light .hljs-literal { color: #0000ff; }
+body.vscode-light .hljs-built_in, body.vscode-light .hljs-type, body.vscode-light .hljs-title.class_ { color: #267f99; }
+body.vscode-light .hljs-title.function_, body.vscode-light .hljs-title { color: #795e26; }
+body.vscode-light .hljs-string, body.vscode-light .hljs-regexp { color: #a31515; }
+body.vscode-light .hljs-number { color: #098658; }
+body.vscode-light .hljs-comment { color: #008000; }
+body.vscode-light .hljs-variable, body.vscode-light .hljs-params, body.vscode-light .hljs-attr, body.vscode-light .hljs-property { color: #001080; }
+body.vscode-light .hljs-meta { color: #af00db; }
+body.vscode-high-contrast .hljs-comment { color: #7ca668; }

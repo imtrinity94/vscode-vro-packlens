@@ -3,6 +3,7 @@ const vscode = require('vscode');
 const path = require('path');
 const zlib = require('zlib');
 const AdmZip = require('adm-zip');
+const rebuild = require('./lib/rebuild');
 
 const VIEW_TYPE = 'vroPackLens.packageViewer';
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
@@ -89,6 +90,127 @@ function getResourceBytes(bytes, id) {
   return entry ? maybeInflate(entry.getData()) : null;
 }
 
+/* ---------- editing: virtual script documents + -modified.package writer ---------- */
+
+const SCHEME = 'vropkg';
+const LANG_EXT = { javascript: '.js', node: '.js', powershell: '.ps1', python: '.py', plaintext: '.txt' };
+const sessions = new Map();  // source package uri -> session
+const vdocs = new Map();     // virtual document path -> { session, elementId, elementType, origVersion, key, content, ctime, mtime }
+
+function safeName(s) { return String(s || 'unnamed').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim() || 'unnamed'; }
+
+function getSession(srcUri, bytes) {
+  const key = srcUri.toString();
+  let s = sessions.get(key);
+  if (!s) {
+    const name = path.basename(srcUri.fsPath || srcUri.path);
+    const targetName = rebuild.modifiedFileName(name);
+    s = {
+      key: key, srcUri: srcUri, name: name, baseBytes: Buffer.from(bytes), edits: {}, panels: new Set(), confirmed: false,
+      target: targetName === name ? srcUri : vscode.Uri.joinPath(srcUri, '..', targetName)
+    };
+    sessions.set(key, s);
+  }
+  return s;
+}
+
+async function writeSession(s) {
+  if (!s.confirmed && s.target.toString() !== s.srcUri.toString()) {
+    let exists = false;
+    try { await vscode.workspace.fs.stat(s.target); exists = true; } catch (e) { /* new file */ }
+    if (exists) {
+      const choice = await vscode.window.showWarningMessage(
+        path.basename(s.target.fsPath) + ' already exists. Replace it with ' + s.name + ' plus the edits made now?',
+        { modal: true, detail: 'Edits made earlier in that copy and not repeated here would be lost. To keep building on that copy, open it in vRO PackLens and edit there instead.' },
+        'Replace');
+      if (choice !== 'Replace') throw new Error('Not saved - ' + path.basename(s.target.fsPath) + ' was left as it is.');
+    }
+    s.confirmed = true;
+  }
+  const out = rebuild.rebuildPackage(s.baseBytes, s.edits);
+  await vscode.workspace.fs.writeFile(s.target, out);
+}
+
+/** Record one edit, rebuild the package copy and tell open viewers. Rolls the edit back on failure. */
+async function commitEdit(s, elementId, elementType, origVersion, apply, notice) {
+  const prev = s.edits[elementId] ? JSON.parse(JSON.stringify(s.edits[elementId])) : null;
+  const e = s.edits[elementId] || (s.edits[elementId] = { type: elementType, version: rebuild.nextVersion(origVersion), scripts: {}, values: {} });
+  apply(e);
+  try {
+    await writeSession(s);
+  } catch (err) {
+    if (prev) s.edits[elementId] = prev; else delete s.edits[elementId];
+    throw err;
+  }
+  const count = Object.keys(s.edits).length;
+  s.panels.forEach(function (p) {
+    p.webview.postMessage(Object.assign({ type: 'edited', elementId: elementId, version: e.version, target: path.basename(s.target.fsPath), elementCount: count }, notice));
+  });
+  vscode.window.setStatusBarMessage('vRO PackLens: saved to ' + path.basename(s.target.fsPath) + ' (version ' + e.version + ')', 4000);
+}
+
+class PackageScriptFs {
+  constructor() { this._emitter = new vscode.EventEmitter(); this.onDidChangeFile = this._emitter.event; }
+  watch() { return new vscode.Disposable(function () {}); }
+  stat(uri) {
+    const d = vdocs.get(uri.path);
+    if (!d) throw vscode.FileSystemError.FileNotFound(uri);
+    return { type: vscode.FileType.File, ctime: d.ctime, mtime: d.mtime, size: Buffer.byteLength(d.content, 'utf8') };
+  }
+  readDirectory() { return []; }
+  createDirectory() { throw vscode.FileSystemError.NoPermissions('Package scripts are virtual files'); }
+  readFile(uri) {
+    const d = vdocs.get(uri.path);
+    if (!d) throw vscode.FileSystemError.FileNotFound(uri);
+    return Buffer.from(d.content, 'utf8');
+  }
+  async writeFile(uri, content) {
+    const d = vdocs.get(uri.path);
+    if (!d) throw vscode.FileSystemError.NoPermissions('This script is no longer linked to a package. Reopen it from vRO PackLens.');
+    const text = Buffer.from(content).toString('utf8');
+    await commitEdit(d.session, d.elementId, d.elementType, d.origVersion, function (e) { e.scripts[d.key] = text; }, { key: d.key, code: text });
+    d.content = text;
+    d.mtime = Date.now();
+    this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri: uri }]);
+  }
+  delete() { throw vscode.FileSystemError.NoPermissions('Package scripts cannot be deleted here'); }
+  rename() { throw vscode.FileSystemError.NoPermissions('Package scripts cannot be renamed'); }
+}
+
+async function openScriptEditor(s, msg) {
+  const ext = LANG_EXT[msg.lang] || '.js';
+  const vpath = '/' + safeName(s.name.replace(/\.package$/i, '')) + '/' + safeName(msg.elementName) + '/' + safeName(msg.label) + ext;
+  let d = vdocs.get(vpath);
+  if (!d || d.session !== s) {
+    d = { session: s, elementId: msg.elementId, elementType: msg.elementType, origVersion: msg.origVersion, key: msg.key, content: msg.code || '', ctime: Date.now(), mtime: Date.now() };
+    vdocs.set(vpath, d);
+  }
+  const uri = vscode.Uri.from({ scheme: SCHEME, path: vpath });
+  const doc = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: false });
+  if (!s.hinted) {
+    s.hinted = true;
+    vscode.window.showInformationMessage('Edit and save (Ctrl/Cmd+S): changes go into ' + path.basename(s.target.fsPath) + ' with the element version bumped. ' + s.name + ' itself is not changed.');
+  }
+}
+
+async function editConfigValue(s, msg) {
+  const isNum = msg.attType === 'number', isBool = msg.attType === 'boolean';
+  let value;
+  if (isBool) {
+    const pick = await vscode.window.showQuickPick(['true', 'false'], { title: msg.elementName + ' / ' + msg.name, placeHolder: 'Current value: ' + (msg.value || '(empty)') });
+    if (pick === undefined) return;
+    value = pick;
+  } else {
+    value = await vscode.window.showInputBox({
+      title: msg.elementName + ' / ' + msg.name + ' (' + msg.attType + ')', value: msg.value || '', prompt: 'Saved into ' + path.basename(s.target.fsPath),
+      validateInput: isNum ? function (v) { return v.trim() === '' || isNaN(Number(v)) ? 'Enter a number' : null; } : undefined
+    });
+    if (value === undefined) return;
+  }
+  await commitEdit(s, msg.elementId, 'ConfigurationElement', msg.origVersion, function (e) { e.values[msg.name] = value; }, { valueName: msg.name, value: value });
+}
+
 /* ---------- custom editor ---------- */
 
 class PackageDocument {
@@ -115,7 +237,9 @@ class PackageEditorProvider {
         const pkg = readPackage(bytes);
         pkg.fileName = fileName;
         pkg.fileSize = bytes.length;
-        panel.webview.postMessage({ type: 'package', pkg: pkg });
+        const s = sessions.get(document.uri.toString());
+        const overlay = s && s.target.toString() !== document.uri.toString() ? { edits: s.edits, target: path.basename(s.target.fsPath) } : null;
+        panel.webview.postMessage({ type: 'package', pkg: pkg, overlay: overlay });
       } catch (err) {
         panel.webview.postMessage({ type: 'error', message: 'Could not read ' + fileName + ': ' + (err && err.message ? err.message : err) });
       }
@@ -124,11 +248,25 @@ class PackageEditorProvider {
     // Reload when the file changes on disk
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(document.uri, '..'), fileName));
     watcher.onDidChange(load);
-    panel.onDidDispose(function () { watcher.dispose(); });
+    const sessionPanels = [];
+    panel.onDidDispose(function () { watcher.dispose(); sessionPanels.forEach(function (s) { s.panels.delete(panel); }); });
+    const session = function () {
+      const s = getSession(document.uri, bytes);
+      if (!s.panels.has(panel)) { s.panels.add(panel); sessionPanels.push(s); }
+      return s;
+    };
+    const existing = sessions.get(document.uri.toString());
+    if (existing) { existing.panels.add(panel); sessionPanels.push(existing); }
 
     panel.webview.onDidReceiveMessage(async (msg) => {
       try {
         if (msg.type === 'ready') { await load(); }
+        else if (msg.type === 'editScript') { await openScriptEditor(session(), msg); }
+        else if (msg.type === 'editValue') { await editConfigValue(session(), msg); }
+        else if (msg.type === 'openModified') {
+          const s = sessions.get(document.uri.toString());
+          if (s) vscode.commands.executeCommand('vscode.openWith', s.target, VIEW_TYPE);
+        }
         else if (msg.type === 'openText') {
           const doc = await vscode.workspace.openTextDocument({ content: msg.content || '', language: msg.language || 'plaintext' });
           await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
@@ -176,6 +314,7 @@ class PackageEditorProvider {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'main.js'));
     const iconsUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'vroIcons.js'));
     const schemaUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'schema.js'));
+    const hljsUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'vendor', 'highlight.min.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'main.css'));
     const version = this.context.extension.packageJSON.version;
     return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
@@ -183,6 +322,7 @@ class PackageEditorProvider {
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
       '<link href="' + styleUri + '" rel="stylesheet"><title>vRO PackLens</title></head>' +
       '<body data-version="' + version + '"><div id="app"><div class="loading">Reading package…</div></div>' +
+      '<script nonce="' + nonce + '" src="' + hljsUri + '"></script>' +
       '<script nonce="' + nonce + '" src="' + iconsUri + '"></script>' +
       '<script nonce="' + nonce + '" src="' + schemaUri + '"></script>' +
       '<script nonce="' + nonce + '" src="' + scriptUri + '"></script></body></html>';
@@ -191,6 +331,7 @@ class PackageEditorProvider {
 
 function activate(context) {
   context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider(SCHEME, new PackageScriptFs(), { isCaseSensitive: true }),
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, new PackageEditorProvider(context), {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: true

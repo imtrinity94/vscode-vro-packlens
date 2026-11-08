@@ -30,6 +30,8 @@
 
   /* ---------- state ---------- */
   let pkg = null;
+  const EDITABLE_TYPES = { string: 1, number: 1, boolean: 1 };
+  let editState = null;  // { target, count }
   let items = [];           // parsed elements
   let byId = {};
   let selectedId = null;
@@ -84,6 +86,43 @@
       return n ? txt(n) : attr(c, 'name');
     }).filter(Boolean);
   }
+
+  function langForRuntime(runtime) {
+    const r = (runtime || '').toLowerCase();
+    if (r.indexOf('python') === 0) return 'python';
+    if (r.indexOf('powershell') === 0 || r.indexOf('powercli') === 0) return 'powershell';
+    return 'javascript';
+  }
+  const LANG_NAME = { powershell: 'PowerShell', python: 'Python', node: 'Node.js', javascript: 'JavaScript' };
+  /** Best guess from the script text, used when the runtime lives in an action environment. */
+  function detectScriptLang(code) {
+    if (!code) return null;
+    const t = code.slice(0, 60000);
+    const count = function (re) { return (t.match(re) || []).length; };
+    const ps = count(/^\s*param\s*\(/gim) * 3 + count(/function\s+Handler\s*\(\s*\$context/gi) * 4 + count(/\$[A-Za-z_][\w:]*\s*=/g) +
+      count(/\b(?:Get|Set|New|Remove|Add|Connect|Disconnect|Write|Import|Invoke|ConvertTo|ConvertFrom|Select|Where|ForEach)-[A-Z][A-Za-z]+/g) * 2 +
+      count(/\s-(?:eq|ne|gt|lt|ge|le|like|match|and|or|not)\s/gi) + count(/\[(?:string|int|bool|hashtable|PSCustomObject|array)\]/gi);
+    const py = count(/^\s*def\s+handler\s*\(\s*context/gim) * 4 + count(/^\s*def\s+\w+\s*\([^)]*\)\s*(?:->[^:]+)?:\s*$/gm) * 2 +
+      count(/^\s*(?:import\s+\w|from\s+[\w.]+\s+import\s)/gm) * 2 + count(/^\s*(?:elif|except|with)\b.*:\s*$/gm) + count(/\b(?:None|True|False)\b/g) * 0.5;
+    const node = count(/\bexports\.handler\s*=/g) * 4 + count(/\brequire\(\s*['"]/g) * 2 + count(/\b(?:async\s+function|await)\b/g);
+    const best = Math.max(ps, py, node);
+    if (best < 3) return null;
+    return best === ps ? 'powershell' : best === py ? 'python' : 'node';
+  }
+  /** runtime → environment → detection → JavaScript (Rhino) */
+  function resolveRuntime(runtime, environmentId, script) {
+    if (runtime && !environmentId) return { lang: langForRuntime(runtime), label: runtime };
+    if (environmentId) {
+      const env = envs[environmentId.trim().toLowerCase()];
+      if (env && env.runtime) return { lang: langForRuntime(env.runtime), label: env.runtime + ' · environment ' + env.name };
+      const guess = detectScriptLang(script);
+      const where = env ? 'environment ' + env.name : 'environment not in package';
+      if (guess) return { lang: guess === 'node' ? 'javascript' : guess, label: LANG_NAME[guess] + ' (detected) · ' + where };
+      return { lang: 'plaintext', label: 'Unknown runtime · ' + where };
+    }
+    return { lang: 'javascript', label: 'JavaScript (Rhino)' };
+  }
+  let envs = {};
 
   function num(v) { return v === '' || v == null ? null : parseFloat(v); }
 
@@ -147,7 +186,9 @@
           inBind: kids(kid(w, 'in-binding'), 'bind').map(function (b) { return { name: attr(b, 'name'), type: attr(b, 'type'), source: attr(b, 'export-name') }; }),
           outBind: kids(kid(w, 'out-binding'), 'bind').map(function (b) { return { name: attr(b, 'name'), type: attr(b, 'type'), target: attr(b, 'export-name') }; })
         };
-        if (o.script && o.script.trim()) { o.scriptIdx = it.scripts.length; it.scripts.push({ label: o.displayName + ' (' + o.name + ')', code: o.script }); }
+        o.runtime = txt(kid(w, 'runtime'));
+        o.environmentId = o.runtime.indexOf('environment:') === 0 ? o.runtime.slice(12) : '';
+        if (o.script && o.script.trim()) { o.scriptIdx = it.scripts.length; it.scripts.push({ label: o.displayName + ' (' + o.name + ')', code: o.script, key: o.name, editLabel: o.displayName + ' (' + o.name + ')' }); }
         return o;
       });
       it.rootName = attr(root, 'root-name');
@@ -163,10 +204,10 @@
       it.version = attr(root, 'version');
       it.returnType = attr(root, 'result-type');
       it.inputs = params(root);
-      const runtime = kid(root, 'runtime');
-      it.runtime = txt(runtime) || attr(root, 'runtime') || 'javascript';
+      it.runtime = attr(root, 'runtime') || txt(kid(root, 'runtime'));
+      it.environmentId = (it.runtime.indexOf('environment:') === 0 ? it.runtime.slice(12) : '') || attr(root, 'environment') || txt(kid(root, 'environment'));
       it.script = decodeScript(kid(root, 'script'));
-      if (it.script.trim()) it.scripts.push({ label: it.name, code: it.script });
+      it.scripts.push({ label: it.name, code: it.script, key: '__action__', editLabel: it.name });
     } else if (type === 'ConfigurationElement' && root) {
       it.name = txt(kid(root, 'display-name')) || attr(root, 'name') || info.name || raw.id;
       it.description = txt(kid(root, 'description'));
@@ -176,8 +217,9 @@
         const t = attr(a, 'type');
         const v = kid(a, 'value');
         let value = txt(v);
-        if (/^SecureString$/i.test(t) || attr(v, 'encoded') === 'y') value = value ? '•••••• (encrypted)' : '';
-        return { name: attr(a, 'name'), type: t, value: value, description: txt(kid(a, 'description')) };
+        const secure = /^SecureString$/i.test(t) || attr(v, 'encoded') === 'y';
+        if (secure) value = value ? '•••••• (encrypted)' : '';
+        return { name: attr(a, 'name'), type: t, value: value, secure: secure, description: txt(kid(a, 'description')) };
       });
     } else if (type === 'ResourceElement') {
       it.name = info.name || info['display-name'] || raw.id;
@@ -192,6 +234,49 @@
     it.searchText = (it.name + ' ' + (it.module || '') + ' ' + it.categories.join('/') + ' ' + it.id + ' ' + (it.description || '')).toLowerCase();
     it.scriptText = it.scripts.map(function (s) { return s.code; }).join('\n').toLowerCase();
     return it;
+  }
+
+  function resolveLanguages(it) {
+    it.origVersion = it.version;
+    if (it.type === 'ScriptModule') {
+      const r = resolveRuntime(it.runtime, it.environmentId, it.script);
+      it.lang = r.lang; it.runtimeLabel = r.label;
+      it.scripts.forEach(function (s) { s.lang = r.lang; });
+    } else if (it.type === 'Workflow') {
+      it.wfItems.forEach(function (w) {
+        const r = resolveRuntime(w.runtime, w.environmentId, w.script);
+        w.lang = r.lang; w.runtimeLabel = r.label;
+        if (w.scriptIdx != null) it.scripts[w.scriptIdx].lang = r.lang;
+      });
+    }
+  }
+
+  /** Apply a saved edit to the in-memory element so the viewer shows what is in the -modified copy. */
+  function patchItem(id, m, quiet) {
+    const it = byId[id];
+    if (!it) return;
+    it.edited = true;
+    if (m.version) it.version = m.version;
+    if (m.key != null) {
+      if (it.type === 'ScriptModule') { it.script = m.code; it.scripts[0].code = m.code; it.scripts[0].edited = true; }
+      else if (it.type === 'Workflow') {
+        const w = it.wfItems.filter(function (x) { return x.name === m.key; })[0];
+        if (w) { w.script = m.code; if (w.scriptIdx != null) { it.scripts[w.scriptIdx].code = m.code; it.scripts[w.scriptIdx].edited = true; } }
+      }
+      it.scriptText = it.scripts.map(function (s) { return s.code; }).join('\n').toLowerCase();
+    }
+    if (m.valueName != null && it.attributes) {
+      it.attributes.forEach(function (a) { if (a.name === m.valueName) { a.value = m.value; a.edited = true; } });
+    }
+  }
+
+  function renderBanner() {
+    const el = document.getElementById('editbar');
+    if (!el) return;
+    if (!editState) { el.innerHTML = ''; el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = '<span>' + editState.count + ' element' + (editState.count === 1 ? '' : 's') + ' edited — saved to <b class="mono">' + esc(editState.target) + '</b> with versions bumped. The original package is unchanged.</span>' +
+      '<button data-act="open-modified">Open copy</button>';
   }
 
   /* ---------- tree building ---------- */
@@ -243,7 +328,7 @@
       html += leaves.map(function (it) {
         const g = GROUPS.filter(function (x) { return x.key === it.type; })[0] || GROUPS[5];
         return '<div class="row leaf ic-' + g.icon + (it.id === selectedId ? ' selected' : '') + '" data-id="' + esc(it.id) + '" data-d="' + (depth + 1) + '" role="treeitem" title="' + esc(it.name) + '">' +
-          '<span class="twisty"></span><span class="ico">' + ICONS[g.icon] + '</span><span class="label">' + esc(it.name) + '</span></div>';
+          '<span class="twisty"></span><span class="ico">' + ICONS[g.icon] + '</span><span class="label">' + esc(it.name) + '</span>' + (it.edited ? '<span class="mod" title="Edited">M</span>' : '') + '</div>';
       }).join('');
     }
     return html;
@@ -261,11 +346,20 @@
   function section(title, body, count) {
     return '<section><h3>' + esc(title) + (count != null ? ' <span class="count">' + count + '</span>' : '') + '</h3>' + body + '</section>';
   }
-  function codeBlock(code, label, idx) {
-    return '<div class="code"><div class="code-head"><span>' + esc(label) + '</span><span class="code-actions">' +
+  function highlight(code, lang) {
+    if (!code) return '';
+    try {
+      if (window.hljs && lang && lang !== 'plaintext' && window.hljs.getLanguage(lang)) return window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    } catch (e) { /* fall back to plain */ }
+    return esc(code);
+  }
+  function codeBlock(code, label, idx, lang, edited) {
+    lang = lang || 'javascript';
+    return '<div class="code' + (edited ? ' edited' : '') + '"><div class="code-head"><span>' + esc(label) + ' <span class="lang-badge lang-' + lang + '">' + esc(LANG_NAME[lang] || lang) + '</span>' +
+      (edited ? ' <span class="edited-badge">edited</span>' : '') + '</span><span class="code-actions">' +
       '<button class="link" data-act="copy-script" data-idx="' + idx + '">Copy</button>' +
-      '<button class="link" data-act="open-script" data-idx="' + idx + '">Open in editor</button></span></div>' +
-      '<pre>' + esc(code) + '</pre></div>';
+      '<button class="link" data-act="edit-script" data-idx="' + idx + '" title="Opens in an editor tab; saving writes a -modified.package copy">Edit</button></span></div>' +
+      '<pre class="hljs">' + (code ? highlight(code, lang) : '<span class="muted">(empty)</span>') + '</pre></div>';
   }
 
   function renderDetail(it) {
@@ -291,7 +385,7 @@
           '<div class="legend"><span><i class="lg lg-blue"></i> next</span><span><i class="lg lg-green"></i> from a decision</span><span><i class="lg lg-red"></i> false path / error handling</span>' +
           '<span class="muted">Click a step for its details. Drag to pan, Ctrl + scroll to zoom.</span></div><div id="wfitem"></div>';
       } else if (wfTab === 'details') {
-        h += kv([['ID', it.objectId || it.id], ['Version', it.version], ['API version', it.apiVersion]]);
+        h += kv([['ID', it.objectId || it.id], ['Version', it.version + (it.edited ? ' (edited)' : '')], ['API version', it.apiVersion]]);
         h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.inputs), it.inputs.length);
         h += section('Outputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.outputs), it.outputs.length);
         h += section('Variables', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Value', 'value', 'mono'], ['Read-only', 'readOnly']], it.attributes), it.attributes.length);
@@ -302,15 +396,20 @@
         });
         h += section('Schema items', table([['Item', 'name', 'mono nowrap'], ['Name', 'displayName'], ['Type', 'type'], ['Calls', 'calls', 'mono'], ['In', 'inputs', 'mono'], ['Out', 'outputs', 'mono'], ['Next', 'next', 'mono nowrap']], flow), flow.length);
       } else {
-        h += section('Scripts', it.scripts.length ? it.scripts.map(function (s, i) { return codeBlock(s.code, s.label, i); }).join('') : '<p class="muted">No scriptable tasks.</p>', it.scripts.length);
+        h += section('Scripts', it.scripts.length ? it.scripts.map(function (s, i) { return codeBlock(s.code, s.label, i, s.lang, s.edited); }).join('') : '<p class="muted">No scriptable tasks.</p>', it.scripts.length);
       }
     } else if (it.type === 'ScriptModule') {
-      h += kv([['Module', it.module], ['ID', it.id], ['Version', it.version], ['Return type', it.returnType || 'void'], ['Runtime', it.runtime]]);
+      h += kv([['Module', it.module], ['ID', it.id], ['Version', it.version + (it.edited ? ' (edited)' : '')], ['Return type', it.returnType || 'void'], ['Runtime', it.runtimeLabel]]);
       h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Description', 'description']], it.inputs), it.inputs.length);
-      h += section('Script', it.scripts.length ? codeBlock(it.script, it.module + '/' + it.name, 0) : '<p class="muted">Empty script.</p>');
+      h += section('Script', codeBlock(it.script, it.module + '/' + it.name, 0, it.scripts[0].lang, it.edited && it.scripts[0].edited));
     } else if (it.type === 'ConfigurationElement') {
-      h += kv([['ID', it.id], ['Version', it.version]]);
-      h += section('Attributes', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Value', 'value', 'mono'], ['Description', 'description']], it.attributes), it.attributes.length);
+      h += kv([['ID', it.id], ['Version', it.version + (it.edited ? ' (edited)' : '')]]);
+      h += section('Attributes', it.attributes.length ? '<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Description</th><th></th></tr></thead><tbody>' +
+        it.attributes.map(function (a, i) {
+          const editable = EDITABLE_TYPES[a.type] && !a.secure;
+          return '<tr' + (a.edited ? ' class="edited-row"' : '') + '><td class="mono">' + esc(a.name) + '</td><td class="mono">' + esc(a.type) + '</td><td class="mono">' + esc(a.value) + (a.edited ? ' <span class="edited-badge">edited</span>' : '') + '</td><td>' + esc(a.description) + '</td>' +
+            '<td class="nowrap">' + (editable ? '<button class="link" data-act="edit-value" data-idx="' + i + '">Edit</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p class="muted">None</p>', it.attributes.length);
     } else if (it.type === 'ResourceElement') {
       h += kv([['ID', it.id], ['MIME type', it.mime], ['Size', fmtSize(it.raw.size)], ['Version', it.version]]);
       if (it.raw.data != null) h += section('Content preview', '<pre class="preview">' + esc(it.raw.data.slice(0, 20000)) + (it.raw.data.length > 20000 ? '\n…' : '') + '</pre>');
@@ -343,13 +442,14 @@
       '<span class="pkgname" title="' + esc(pkg.fileName) + '">' + esc(pkgName) + '</span><span class="muted small">' + fmtSize(pkg.fileSize) + '</span>' +
       '<span class="spacer"></span><button data-act="export" title="Write every workflow, action and element to a folder">Export to folder…</button></div>' +
       (meta['pkg-description'] ? '<div class="pkgdesc">' + esc(meta['pkg-description']) + '</div>' : '') +
-      '<div class="chips">' + counts + '</div>' +
+      '<div class="chips">' + counts + '</div><div id="editbar" class="editbar" hidden></div>' +
       '<div class="main"><aside class="side"><div class="search"><input id="q" type="text" placeholder="Filter by name, module, folder…" spellcheck="false" value="' + esc(filterText) + '">' +
       '<label class="small"><input id="qs" type="checkbox"' + (searchScripts ? ' checked' : '') + '> in scripts</label>' +
       '<span class="tree-actions"><button class="icon-btn" data-act="expand" title="Expand all">+</button><button class="icon-btn" data-act="collapse" title="Collapse all">−</button></span></div>' +
       '<div id="tree" class="tree" role="tree" tabindex="0"></div></aside><div class="splitter"></div><main id="detail" class="detail"></main></div>';
     renderTree();
     renderDetailPane();
+    renderBanner();
     wireShell();
   }
 
@@ -404,7 +504,8 @@
     h += kv([['Calls action', w.module], ['Calls workflow', w.linked || w.launchedWorkflowId], ['Next', w.next], ['False / alt path', w.altNext], ['On error', w.catchName], ['Prototype', w.prototypeId]]);
     h += section('Inputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Bound to', 'source', 'mono']], w.inBind), w.inBind.length);
     h += section('Outputs', table([['Name', 'name', 'mono'], ['Type', 'type', 'mono'], ['Bound to', 'target', 'mono']], w.outBind), w.outBind.length);
-    if (w.scriptIdx != null) h += section('Script', codeBlock(w.script, w.displayName, w.scriptIdx));
+    if (w.scriptIdx != null) h += section('Script', codeBlock(w.script, w.displayName, w.scriptIdx, it.scripts[w.scriptIdx].lang, it.scripts[w.scriptIdx].edited));
+    if (w.runtimeLabel && w.runtimeLabel !== 'JavaScript (Rhino)') h = h.replace('<h3 class="ip-title">', '<h3 class="ip-title" title="' + esc(w.runtimeLabel) + '">');
     box.innerHTML = h + '</div>';
   }
 
@@ -484,9 +585,18 @@
       const it = byId[selectedId];
       if (act === 'expand') { collapsed = {}; persist(); renderTree(); }
       else if (act === 'collapse') { collapsed = {}; allPaths().forEach(function (p) { collapsed[p] = true; }); persist(); renderTree(); }
+      else if (act === 'open-modified') { vscode.postMessage({ type: 'openModified' }); }
       else if (act === 'export') { vscode.postMessage({ type: 'export', folderName: safe((parseProps(pkg.meta)['pkg-name'] || pkg.fileName.replace(/\.package$/i, ''))), files: exportFiles() }); }
       else if (!it) { return; }
-      else if (act === 'open-script') { const s = it.scripts[+b.dataset.idx]; vscode.postMessage({ type: 'openText', language: 'javascript', content: s.code }); }
+      else if (act === 'edit-script') {
+        const sc = it.scripts[+b.dataset.idx];
+        vscode.postMessage({ type: 'editScript', elementId: it.id, elementType: it.type, elementName: it.type === 'ScriptModule' ? it.module + '.' + it.name : it.name,
+          origVersion: it.origVersion, key: sc.key, label: sc.editLabel, lang: sc.lang, code: sc.code });
+      }
+      else if (act === 'edit-value') {
+        const a = it.attributes[+b.dataset.idx];
+        vscode.postMessage({ type: 'editValue', elementId: it.id, elementName: it.name, origVersion: it.origVersion, name: a.name, attType: a.type, value: a.value });
+      }
       else if (act === 'copy-script') { vscode.postMessage({ type: 'copy', text: it.scripts[+b.dataset.idx].code }); }
       else if (act === 'open-xml') { vscode.postMessage({ type: 'openText', language: it.root ? 'xml' : guessLang(it), content: it.raw.data || '' }); }
       else if (act === 'save-res') { vscode.postMessage({ type: 'saveResource', id: it.id, name: it.name }); }
@@ -595,12 +705,41 @@
     const msg = e.data || {};
     if (msg.type === 'package') {
       pkg = msg.pkg;
+      envs = {};
+      pkg.elements.forEach(function (raw) {
+        const info = parseProps(raw.info);
+        if (info.type === 'ActionEnvironment') envs[raw.id.toLowerCase()] = { name: info.name || raw.id, runtime: info.runtime || '' };
+      });
       items = pkg.elements.map(parseElement);
+      items.forEach(resolveLanguages);
       byId = {};
       items.forEach(function (i) { byId[i.id] = i; });
+      editState = null;
+      if (msg.overlay && msg.overlay.edits) {
+        Object.keys(msg.overlay.edits).forEach(function (id) {
+          const e = msg.overlay.edits[id];
+          Object.keys(e.scripts || {}).forEach(function (k) { patchItem(id, { key: k, code: e.scripts[k], version: e.version }, true); });
+          Object.keys(e.values || {}).forEach(function (n) { patchItem(id, { valueName: n, value: e.values[n], version: e.version }, true); });
+        });
+        editState = { target: msg.overlay.target, count: Object.keys(msg.overlay.edits).length };
+      }
       if (saved.selectedId && byId[saved.selectedId] && !selectedId) selectedId = saved.selectedId;
       if (selectedId && !byId[selectedId]) selectedId = null;
       renderShell();
+    } else if (msg.type === 'edited') {
+      editState = { target: msg.target, count: msg.elementCount };
+      patchItem(msg.elementId, msg, false);
+      renderBanner();
+      renderTree();
+      const keepScroll = document.getElementById('detail').scrollTop;
+      const view = document.getElementById('wfview');
+      const sl = view ? view.scrollLeft : 0, st = view ? view.scrollTop : 0;
+      if (msg.elementId === selectedId) {
+        renderDetailPane();
+        document.getElementById('detail').scrollTop = keepScroll;
+        const v2 = document.getElementById('wfview');
+        if (v2) { v2.scrollLeft = sl; v2.scrollTop = st; }
+      }
     } else if (msg.type === 'error') {
       app.innerHTML = '<div class="error"><h2>Could not open this package</h2><p>' + esc(msg.message) + '</p><p class="muted">vRO PackLens reads packages exported from vRealize Orchestrator 7.x, Aria Automation Orchestrator 8.x and VCF Operations Orchestrator 9.x.</p></div>';
     }

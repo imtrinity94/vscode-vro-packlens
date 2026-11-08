@@ -12,9 +12,11 @@ Click any `.package` file in the VS Code Explorer and it opens as a browsable tr
 - **Resource Elements** – metadata, text preview, *Save as…*
 - **Policy Templates** and anything else in the package
 
+Editing: click **Edit** on any script to open it in a normal editor tab; saving writes a `-modified.package` copy next to the original with the element version bumped and signatures kept. Configuration values (string/number/boolean) can be edited from the Attributes table. Scripts are colour-highlighted by language (JavaScript, PowerShell/PowerCLI, Python, Node.js).
+
 Extras: filter by name/module/folder (optionally inside scripts), open any script or XML in a real editor tab, and **Export to folder…** to unpack the whole package as `.js` / `.xml` files you can grep or diff.
 
-Works with packages from vRealize Orchestrator 7.x, Aria Automation Orchestrator 8.x and VCF Operations Orchestrator 9.x. Read-only – the package is never modified.
+Works with packages from vRealize Orchestrator 7.x, Aria Automation Orchestrator 8.x and VCF Operations Orchestrator 9.x. The original package is never modified.
 
 ## Install
 Extensions view → `…` menu → **Install from VSIX…** → pick `vro-packlens-<version>.vsix`.
@@ -32,4 +34,4 @@ A sample package for testing is in `samples/`.
 [vRO Peekage](https://github.com/imtrinity94/vRO-Peekage) is the separate web app for viewing packages in a browser.
 
 ## Credits
-Schema icons from [wdt4vro](https://github.com/imtrinity94/wdt4vro) (MIT); schema layout ported from vRO Peekage.
+Schema icons from [wdt4vro](https://github.com/imtrinity94/wdt4vro) (MIT); schema layout, rebuild rules and language detection ported from vRO Peekage. Syntax highlighting by [highlight.js](https://highlightjs.org) (BSD-3-Clause).
