@@ -30,7 +30,7 @@
 
   /* ---------- state ---------- */
   let pkg = null;
-  const EDITABLE_TYPES = { string: 1, number: 1, boolean: 1 };
+  const EDITABLE_TYPES = { string: 1, text: 1, number: 1, boolean: 1 };  // compared lower-case: exports use 'String', 'Text'
   let editState = null;  // { target, count }
   let items = [];           // parsed elements
   let byId = {};
@@ -406,7 +406,7 @@
       h += kv([['ID', it.id], ['Version', it.version + (it.edited ? ' (edited)' : '')]]);
       h += section('Attributes', it.attributes.length ? '<table class="grid"><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Description</th><th></th></tr></thead><tbody>' +
         it.attributes.map(function (a, i) {
-          const editable = EDITABLE_TYPES[a.type] && !a.secure;
+          const editable = EDITABLE_TYPES[String(a.type).toLowerCase()] && !a.secure;
           return '<tr' + (a.edited ? ' class="edited-row"' : '') + '><td class="mono">' + esc(a.name) + '</td><td class="mono">' + esc(a.type) + '</td><td class="mono">' + esc(a.value) + (a.edited ? ' <span class="edited-badge">edited</span>' : '') + '</td><td>' + esc(a.description) + '</td>' +
             '<td class="nowrap">' + (editable ? '<button class="link" data-act="edit-value" data-idx="' + i + '">Edit</button>' : '') + '</td></tr>';
         }).join('') + '</tbody></table>' : '<p class="muted">None</p>', it.attributes.length);

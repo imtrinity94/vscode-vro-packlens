@@ -195,7 +195,8 @@ async function openScriptEditor(s, msg) {
 }
 
 async function editConfigValue(s, msg) {
-  const isNum = msg.attType === 'number', isBool = msg.attType === 'boolean';
+  const t = String(msg.attType || '').toLowerCase();
+  const isNum = t === 'number', isBool = t === 'boolean';
   let value;
   if (isBool) {
     const pick = await vscode.window.showQuickPick(['true', 'false'], { title: msg.elementName + ' / ' + msg.name, placeHolder: 'Current value: ' + (msg.value || '(empty)') });

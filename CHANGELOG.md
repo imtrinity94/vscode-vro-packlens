@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026.3.1 – 2026-11-12
+- Fix: configuration values of type `String` and `Text` were not editable. Orchestrator exports type names with a capital letter (`String`), and the check only matched lower-case `string`. Checked against a real package exported from Aria Automation Orchestrator 8.18.1.
+
 ## 2026.3.0 – 2026-11-08
 - Edit scripts in place: **Edit** on any action or scriptable-task script opens it in a normal VS Code editor tab (.js / .ps1 / .py, so IntelliSense and your themes apply). Saving (Ctrl/Cmd+S) writes the change into `<name>-modified.package` next to the original; the original package is never changed.
 - Edit configuration element values (string, number, boolean) from the Attributes table. SecureStrings stay read-only.

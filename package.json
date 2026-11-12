@@ -2,7 +2,7 @@
   "name": "vro-packlens",
   "displayName": "vRO PackLens",
   "description": "See inside any vRO package - right in VS Code. Click a .package file to browse its workflows, actions, configuration and resource elements in their folder structure.",
-  "version": "2026.3.0",
+  "version": "2026.3.1",
   "publisher": "imtrinity94",
   "author": "Mayank Goyal",
   "license": "MIT",
