@@ -26,7 +26,7 @@ Search **vRO PackLens** in the VS Code Extensions view, or install it from the [
 
 From the command line: `code --install-extension imtrinity94.vro-packlens`
 
-Offline: Extensions view → `…` menu → **Install from VSIX…** → pick `vro-packlens-<version>.vsix`.
+Offline: download the VSIX from the [`published`](published) folder, then Extensions view → `…` menu → **Install from VSIX…** and pick it.
 
 If another extension already claims `.package`, right-click the file → **Open with vRO PackLens** (or *Open With…* → vRO PackLens → *Configure default*).
 

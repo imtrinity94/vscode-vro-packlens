@@ -4,3 +4,4 @@ samples/**
 .github/**
 media/screenshot.png
 .gitignore
+published/**
